@@ -1,6 +1,7 @@
 import java.io.*;
 import java.math.BigInteger;
 import java.util.*;
+import java.util.regex.*;
 
 // Fraction class to handle exact rational arithmetic
 class Fraction {
@@ -32,57 +33,97 @@ class Fraction {
         return new Fraction(this.num.negate(), this.den);
     }
 
-    BigInteger toBigInteger() {
+    long toLong() {
         if (!den.equals(BigInteger.ONE)) {
             throw new ArithmeticException("Not an integer result: " + num + "/" + den);
         }
-        return num;
+        return num.longValue();
     }
 }
 
 public class Solution {
+    // Parse a string containing digits/letters into BigInteger given base (2..36)
+    static BigInteger parseBigIntegerInBase(String s, int base) {
+        if (s == null || s.isEmpty()) throw new NumberFormatException("Empty value string");
+        if (base < Character.MIN_RADIX || base > Character.MAX_RADIX)
+            throw new NumberFormatException("Base out of range: " + base);
+        s = s.trim();
+        boolean negative = false;
+        if (s.startsWith("-")) { negative = true; s = s.substring(1); }
+        s = s.toLowerCase(Locale.ROOT);
+        BigInteger result = BigInteger.ZERO;
+        BigInteger B = BigInteger.valueOf(base);
+        for (int i = 0; i < s.length(); ++i) {
+            char c = s.charAt(i);
+            int digit = Character.digit(c, base);
+            if (digit == -1) throw new NumberFormatException("Invalid digit '" + c + "' for base " + base);
+            result = result.multiply(B).add(BigInteger.valueOf(digit));
+        }
+        return negative ? result.negate() : result;
+    }
+
     public static void main(String[] args) throws Exception {
-        // Read JSON file (replace "input2.json" with the actual input filename)
-        BufferedReader br = new BufferedReader(new FileReader("input2.json"));
-        StringBuilder sb = new StringBuilder();
-        String line;
-        while ((line = br.readLine()) != null) sb.append(line);
-        br.close();
-        String json = sb.toString();
+        String filename = (args.length > 0) ? args[0] : "input2.json"; // default
+        String json;
+        try (BufferedReader br = new BufferedReader(new FileReader(filename))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) sb.append(line);
+            json = sb.toString();
+        } catch (FileNotFoundException e) {
+            System.err.println("File not found: " + filename);
+            return;
+        }
 
-        // Extract k
-        int k = Integer.parseInt(json.replaceAll(".*\"k\"\\s*:\\s*(\\d+).*", "$1"));
+        // extract k
+        Matcher km = Pattern.compile("\"k\"\\s*:\\s*(\\d+)").matcher(json);
+        if (!km.find()) {
+            System.err.println("Could not find key \"k\" in JSON.");
+            return;
+        }
+        int k = Integer.parseInt(km.group(1));
 
-        // Collect (xi, yi)
+        // Prepare lists for x and y
         ArrayList<BigInteger> xs = new ArrayList<>();
         ArrayList<BigInteger> ys = new ArrayList<>();
 
+        // Pattern to extract each indexed object like "1": { "base": "10", "value":"4" }
         for (int i = 1; i <= k; ++i) {
-            String pattern = "\"" + i + "\"\\s*:\\s*\\{[^}]*\"base\"\\s*:\\s*\"(\\d+)\"[^}]*\"value\"\\s*:\\s*\"([^\"]+)\"";
-            if (json.matches(".*" + pattern + ".*")) {
-                String baseStr = json.replaceAll(".*" + pattern + ".*", "$1");
-                String valueStr = json.replaceAll(".*" + pattern + ".*", "$2");
-                int base = Integer.parseInt(baseStr);
-                xs.add(BigInteger.valueOf(i));
-                ys.add(new BigInteger(valueStr, base));
+            String patStr = "\"" + i + "\"\\s*:\\s*\\{[^}]*\"base\"\\s*:\\s*\"(\\d+)\"[^}]*\"value\"\\s*:\\s*\"([^\"]+)\"";
+            Matcher m = Pattern.compile(patStr).matcher(json);
+            if (!m.find()) {
+                System.err.println("Warning: entry for index " + i + " not found or not in expected format.");
+                continue;
             }
+            int base = Integer.parseInt(m.group(1));
+            String valueStr = m.group(2);
+            xs.add(BigInteger.valueOf(i));
+            ys.add(parseBigIntegerInBase(valueStr, base));
         }
 
-        // Lagrange interpolation at x=0
-        Fraction result = new Fraction(BigInteger.ZERO, BigInteger.ONE);
+        if (xs.size() < k) {
+            System.err.println("Found only " + xs.size() + " valid points but expected k=" + k + ". Aborting.");
+            return;
+        }
 
-        for (int i = 0; i < k; i++) {
+        // Lagrange interpolation at x = 0 using Fraction
+        Fraction result = new Fraction(BigInteger.ZERO, BigInteger.ONE);
+        for (int i = 0; i < k; ++i) {
             Fraction Li = new Fraction(BigInteger.ONE, BigInteger.ONE);
-            for (int j = 0; j < k; j++) {
+            for (int j = 0; j < k; ++j) {
                 if (i == j) continue;
-                // Multiply by (-xj)/(xi - xj)
                 Li = Li.multiply(new Fraction(xs.get(j).negate(), xs.get(i).subtract(xs.get(j))));
             }
             Li = Li.multiply(new Fraction(ys.get(i), BigInteger.ONE));
             result = result.add(Li);
         }
 
-        // Print exact integer constant
-        System.out.println(result.toBigInteger());
+        // Print exact constant term as long
+        try {
+            long constant = result.toLong();
+            System.out.println(constant);
+        } catch (ArithmeticException ex) {
+            System.err.println("Result is too large to fit in long: " + ex.getMessage());
+        }
     }
 }
